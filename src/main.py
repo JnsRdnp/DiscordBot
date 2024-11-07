@@ -19,13 +19,12 @@ async def on_ready():
     print("Bot is ready.")
 
 @bot.command()
-async def hello(ctx):
+async def commands(ctx):
     print('In "hello" function')
-    await ctx.send("Hello, I am PompivaBot.")
+    embeded_msg = discord.Embed(title="List of commands", description="", color=discord.Color.green())
+    embeded_msg.add_field(name="Play a track", value="!play <link>", inline=False)
+    await ctx.send(embed=embeded_msg)
 
 
 bot.run(bot_token)
-
-
-
 
