@@ -20,6 +20,7 @@ class MusicBot(commands.Cog):
 
     @commands.command(name="play")
     async def play(self, ctx, *, link):
+
         current_function = inspect.currentframe().f_code.co_name
         print(f"Executing function: {current_function}")
         """Play a song or add it to the queue if one is already playing."""
@@ -37,6 +38,8 @@ class MusicBot(commands.Cog):
         if not song:
             return
 
+
+        await ctx.message.delete()
         # Play the song or add it to the queue
         await self.play_song(ctx, song, link)
                 
@@ -95,7 +98,7 @@ class MusicBot(commands.Cog):
         await ctx.message.delete()
 
 
-    async def send_and_append(self, ctx, message):
+    async def append_to_messages(self, ctx, message):
         current_function = inspect.currentframe().f_code.co_name
         print(f"Executing function: {current_function}")
         try:
@@ -104,11 +107,32 @@ class MusicBot(commands.Cog):
                 self.bot_messages[ctx.guild.id] = []
 
             # Send the message and append it to the guild's list
-            bot_message = await ctx.send(message)
-            self.bot_messages[ctx.guild.id].append(bot_message)
+            self.bot_messages[ctx.guild.id].append(message)
 
         except Exception as e:
             print(f"An error occurred in send and append: {e}")
+
+    async def delete_all_messages(self, ctx):
+        current_function = inspect.currentframe().f_code.co_name
+        print(f"Executing function: {current_function}")
+        try:
+            # Check if there are messages to delete for the guild
+            if ctx.guild.id in self.bot_messages:
+                # Iterate through all the messages and delete them
+                for message in self.bot_messages[ctx.guild.id]:
+                    try:
+                        await message.delete()
+                    except Exception as e:
+                        print(f"Failed to delete message: {e}")
+
+                # Clear the message list for the guild
+                self.bot_messages[ctx.guild.id] = []
+                print("All messages deleted successfully.")
+            else:
+                print("No messages to delete for this guild.")
+
+        except Exception as e:
+            print(f"An error occurred in delete_all_messages: {e}")
 
 
     async def connect_to_voice_channel(self, ctx):
@@ -194,53 +218,73 @@ class MusicBot(commands.Cog):
             # If a song is playing, add this song to the queue
             self.queues[ctx.guild.id].append({"song": song, "link": link})
 
+            await self.embed_status(ctx)
+
+
 
     async def after_song_finish(self, ctx):
         current_function = inspect.currentframe().f_code.co_name
         print(f"Executing function: {current_function}")
         """Called when a song finishes playing. Plays the next song in the queue."""
-        if len(self.queues[ctx.guild.id]) > 0:
-            next_song = self.queues[ctx.guild.id].pop(0)  # Remove the song from the queue before playing
-            await self.play_song(ctx, next_song)
+        
+        # Check if the queue exists and has songs
+        if ctx.guild.id in self.queues and len(self.queues[ctx.guild.id]) > 0:
+            # Retrieve the next song dictionary (contains 'song' and 'link')
+            next_song = self.queues[ctx.guild.id].pop(0)
+            
+            # Extract the song and link
+            song = next_song["song"]
+            link = next_song["link"]
+
+            print(f"Next song link: {link}")
+            
+            # Play the next song
+            await self.play_song(ctx, song, link)
+            await self.embed_status(ctx)
         else:
+            self.delete_all_messages(ctx)
             print("Queue is empty")
 
 
-    async def embed_status(self, ctx, link):
+    async def embed_status(self, ctx):
+
+        # Delete all previous status messages
+        await self.delete_all_messages(ctx)
+
         try:
-            video_title = await self.get_title(self.now_playing)
-            thumbnail_url = await self.get_thumbnail(self.now_playing)
+            # Get the queue for the current guild
+            queue = self.queues.get(ctx.guild.id, [])  # Defaults to an empty list if no queue exists
+
+            if not queue:
+                return
 
             # Create the embed
-            embed = discord.Embed(title="Now playing", description=f'{video_title}', color=0x56c50d)
-            
-            # Add the thumbnail if it exists:
-            if thumbnail_url:
-                embed.set_thumbnail(url=thumbnail_url)
-            
-            # Spacer field (empty field for space)
-            embed.add_field(name="\u200b", value="\u200b", inline=False)  # Zero-width space for spacing
-            
-            # Queue field and other fields
-            embed.add_field(name="Queue", value="", inline=False)
+            embed = discord.Embed(title="Queue", color=0x56c50d)
 
-            # Assuming self.queues is a dictionary where each guild has a queue list
-            queue = self.queues.get(ctx.guild.id, [])  # Get the queue for the current guild, default to empty list
-            for track in queue:
-                title = await self.get_title(f'{track}')
-                embed.add_field(name="", value=f'{title}', inline=False)
-            
-            embed.add_field(name="\u200b", value="\u200b", inline=False)  # Zero-width space for spacing
-            embed.set_footer(text="Use !play <link/search> to request a track.")
+            # Dynamically list all songs in the queue
+            queue_details = []
+            for index, track in enumerate(queue, start=1):
+                try:
+                    title = await self.get_title(track["link"])  # Fetch title dynamically
+                    queue_details.append(f"{index}. [{title}]({track['link']})")
+                except Exception as e:
+                    print(f"Error fetching title for track {track}: {e}")
+                    queue_details.append(f"{index}. [Unknown Title]({track['link']})")
+
+            # Join all queue details into a single string for the embed
+            embed.add_field(name="Tracks currently in queue", value="\n".join(queue_details), inline=False)
+
+            # Footer for usage instructions
+            embed.set_footer(text="Use !play <link/search> to add a song to the queue.")
 
             # Send the embed
-            await ctx.send(embed=embed)
-            
-        except Exception as e:
-            print(f"Error extracting video info: {e}")
-            await ctx.send("An error occurred while fetching video information.")
+            message = await ctx.send(embed=embed)
+            await self.append_to_messages(ctx, message)
 
-            
+        except Exception as e:
+            print(f"Error generating queue embed: {e}")
+
+
     async def get_title(self, link):
         with yt_dlp.YoutubeDL() as ydl:
             info_dict = ydl.extract_info(link, download=False)
