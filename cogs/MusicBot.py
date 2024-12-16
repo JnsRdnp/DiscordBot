@@ -29,7 +29,7 @@ class MusicBot(commands.Cog):
         await self.connect_to_voice_channel(ctx)
 
         # Search YouTube if the link is not a direct URL
-        link = await self.search_youtube(ctx, link)
+        link = await self.search_youtube(link)
         if not link:
             return
 
@@ -149,7 +149,7 @@ class MusicBot(commands.Cog):
             print(f"Error connecting to the voice channel: {e}")
             await ctx.send('Failed to connect to the voice channel.')
 
-    async def search_youtube(self, ctx, link):
+    async def search_youtube(self, link):
         current_function = inspect.currentframe().f_code.co_name
         print(f"Executing function: {current_function}")
         """Search YouTube for the link if it is not a direct URL."""
@@ -159,24 +159,25 @@ class MusicBot(commands.Cog):
             if self.youtube_base_url not in link:
                 query_string = urllib.parse.urlencode({'search_query': link})
                 content = urllib.request.urlopen(self.youtube_results_url + query_string)
-        except Exception as e:
-            print(f"Error processing the YouTube search: {e}")
-            return None
-        
-        # Try to extract the search results from the content
-        try:
-            search_results = re.findall(r'/watch\?v=(.{11})', content.read().decode())
-            
-            if not search_results:
-                print("No results found from the search.")
-                return None
-            
-            link = self.youtube_watch_url + search_results[0]
-        except Exception as e:
-            print(f"Error extracting search results: {e}")
-            return None
 
-        print(f"Returning {link}")
+        
+                # Try to extract the search results from the content
+                try:
+                    search_results = re.findall(r'/watch\?v=(.{11})', content.read().decode())
+                    
+                    if not search_results:
+                        print("No results found from the search.")
+                        return None
+                    
+                    link = self.youtube_watch_url + search_results[0]
+                except Exception as e:
+                    print(f"Error extracting search results: {e}")
+                    return None
+            else:
+                print("The link was a youtube link")
+        except Exception as e:
+            print("Something went wrong at parsing the video link")
+            
         return link
     
     async def extract_audio(self, link):
@@ -243,7 +244,7 @@ class MusicBot(commands.Cog):
             await self.play_song(ctx, song, link)
             await self.embed_status(ctx)
         else:
-            self.delete_all_messages(ctx)
+            await self.delete_all_messages(ctx)
             print("Queue is empty")
 
 
