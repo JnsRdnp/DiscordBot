@@ -205,7 +205,7 @@ class MusicBot(commands.Cog):
         current_function = inspect.currentframe().f_code.co_name
         print(f"Executing function: {current_function}")
         """Play the song or add it to the queue."""
-        player = discord.FFmpegOpusAudio(song, **self.ffmpeg_options)
+        
 
         # Ensure a queue exists for the guild
         if ctx.guild.id not in self.queues:
@@ -213,6 +213,7 @@ class MusicBot(commands.Cog):
 
         # If no song is playing, start playing this song
         if not ctx.voice_client.is_playing():
+            player = discord.FFmpegOpusAudio(song, **self.ffmpeg_options)
             ctx.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(self.after_song_finish(ctx), self.bot.loop))
         else:
             # If a song is playing, add this song to the queue
