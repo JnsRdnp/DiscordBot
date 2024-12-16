@@ -35,11 +35,10 @@ class MusicBot(commands.Cog):
         # Extract audio from the YouTube link
         song = await self.extract_audio(link)
         if not song:
-            await ctx.send("An error occurred while extracting audio.")
             return
 
         # Play the song or add it to the queue
-        await self.play_song(ctx, song)
+        await self.play_song(ctx, song, link)
                 
 
     @commands.command(name="skip")
@@ -54,15 +53,12 @@ class MusicBot(commands.Cog):
                 ctx.voice_client.stop()
                 print(f"Skipping song in guild {ctx.guild.id}")
                 
-                # Notify the user
-                await self.send_and_append(ctx, "Song skipped")
-                
                 # Call after_song_finish to handle the next song
             else:
-                await self.send_and_append(ctx, "Nothing is currently playing")
+                print("Nothing is playing")
         except Exception as e:
             print(f"Error skipping song: {e}")
-            await self.send_and_append(ctx, "An error occurred while trying to skip the song")
+        await ctx.message.delete()
 
 
     @commands.command(name="leave")
@@ -91,13 +87,10 @@ class MusicBot(commands.Cog):
                         await msg.delete()
                     del self.bot_messages[ctx.guild.id]
 
-                # Notify the user
-                await self.send_and_append(ctx, "Disconnected from the voice channel and cleared the queue.")
             else:
-                await self.send_and_append(ctx, "I'm not connected to a voice channel.")
+                print("I'm not connected to a voice channel.")
         except Exception as e:
             print(f"Error leaving the voice channel: {e}")
-            await self.send_and_append(ctx, "An error occurred while trying to leave the voice channel.")
 
         await ctx.message.delete()
 
@@ -144,7 +137,6 @@ class MusicBot(commands.Cog):
                 content = urllib.request.urlopen(self.youtube_results_url + query_string)
         except Exception as e:
             print(f"Error processing the YouTube search: {e}")
-            await ctx.send('An error occurred while processing the search query.')
             return None
         
         # Try to extract the search results from the content
@@ -153,15 +145,14 @@ class MusicBot(commands.Cog):
             
             if not search_results:
                 print("No results found from the search.")
-                await ctx.send("No results found for your search.")
                 return None
             
             link = self.youtube_watch_url + search_results[0]
         except Exception as e:
             print(f"Error extracting search results: {e}")
-            await ctx.send('An error occurred while extracting YouTube results.')
             return None
 
+        print(f"Returning {link}")
         return link
     
     async def extract_audio(self, link):
@@ -170,16 +161,23 @@ class MusicBot(commands.Cog):
         """Extract audio URL from the YouTube link."""
         
         try:
+            # Run the blocking ytdl extract_info in the executor
             loop = asyncio.get_event_loop()
             data = await loop.run_in_executor(None, lambda: self.ytdl.extract_info(link, download=False))
-            song = data['url']
-            return song
+            
+            # Extract the song URL from the data
+            song = data.get('url')  # Use .get() to prevent KeyError if 'url' isn't found
+            if song:
+                return song
+            else:
+                raise ValueError("No audio URL found")
+        
         except Exception as e:
             print(f"Error extracting audio data from the YouTube link: {e}")
-            return
+            return None  # Or handle more gracefully
 
 
-    async def play_song(self, ctx, song):
+    async def play_song(self, ctx, song, link):
         current_function = inspect.currentframe().f_code.co_name
         print(f"Executing function: {current_function}")
         """Play the song or add it to the queue."""
@@ -191,11 +189,10 @@ class MusicBot(commands.Cog):
 
         # If no song is playing, start playing this song
         if not ctx.voice_client.is_playing():
-            ctx.voice_client.play(player, loop=self.bot.loop, after=lambda e: self.after_song_finish(ctx))
+            ctx.voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(self.after_song_finish(ctx), self.bot.loop))
         else:
             # If a song is playing, add this song to the queue
-            self.queues[ctx.guild.id].append(song)
-            await ctx.send(f'Added to queue: {song}')
+            self.queues[ctx.guild.id].append({"song": song, "link": link})
 
 
     async def after_song_finish(self, ctx):
@@ -207,6 +204,55 @@ class MusicBot(commands.Cog):
             await self.play_song(ctx, next_song)
         else:
             print("Queue is empty")
+
+
+    async def embed_status(self, ctx, link):
+        try:
+            video_title = await self.get_title(self.now_playing)
+            thumbnail_url = await self.get_thumbnail(self.now_playing)
+
+            # Create the embed
+            embed = discord.Embed(title="Now playing", description=f'{video_title}', color=0x56c50d)
+            
+            # Add the thumbnail if it exists:
+            if thumbnail_url:
+                embed.set_thumbnail(url=thumbnail_url)
+            
+            # Spacer field (empty field for space)
+            embed.add_field(name="\u200b", value="\u200b", inline=False)  # Zero-width space for spacing
+            
+            # Queue field and other fields
+            embed.add_field(name="Queue", value="", inline=False)
+
+            # Assuming self.queues is a dictionary where each guild has a queue list
+            queue = self.queues.get(ctx.guild.id, [])  # Get the queue for the current guild, default to empty list
+            for track in queue:
+                title = await self.get_title(f'{track}')
+                embed.add_field(name="", value=f'{title}', inline=False)
+            
+            embed.add_field(name="\u200b", value="\u200b", inline=False)  # Zero-width space for spacing
+            embed.set_footer(text="Use !play <link/search> to request a track.")
+
+            # Send the embed
+            await ctx.send(embed=embed)
+            
+        except Exception as e:
+            print(f"Error extracting video info: {e}")
+            await ctx.send("An error occurred while fetching video information.")
+
+            
+    async def get_title(self, link):
+        with yt_dlp.YoutubeDL() as ydl:
+            info_dict = ydl.extract_info(link, download=False)
+            video_title = info_dict.get('title', 'Unknown Title')  # Get the video title
+            return video_title
+
+    async def get_thumbnail(self, link):
+        with yt_dlp.YoutubeDL() as ydl:
+            info_dict = ydl.extract_info(link, download=False)
+            thumbnail_url = info_dict.get('thumbnail', '')  # Get the thumbnail URL  
+            return thumbnail_url   
+
 
 
 
